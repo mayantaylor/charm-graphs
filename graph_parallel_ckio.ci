@@ -11,73 +11,81 @@ mainmodule graph_parallel_ckio
   readonly int imax;
   mainchare Main
   {
-    entry Main(CkArgMsg* m);
-    entry void ready(Ck::IO::FileReadyMsg *m);
-    entry void start_read(Ck::IO::SessionReadyMsg *m);
-    entry void done_read(CkReductionMsg *m);
-    entry void sessionClosed(CkReductionMsg *m);
-    entry void closed(CkReductionMsg *m);
-    entry void run()
-    {
-      serial
-      {
-        Ck::IO::Options opts;
-        opts.numReaders = N * 4;
-        CkCallback opened(CkIndex_Main::ready(NULL), thisProxy);
-        start_time = CkWallTimer();
-        Ck::IO::open(file_name, opened, opts);
-      }
-      when ready(Ck::IO::FileReadyMsg *m) serial
-      {
-        f = m->file;
-        CkCallback sessionStart(CkIndex_Main::start_read(0), thisProxy);
-        Ck::IO::startReadSession(f, file_size, 0, sessionStart);
-        delete m;
-      }
-      when start_read(Ck::IO::SessionReadyMsg *m) serial
-      {
-        session = m->session;
-        long chunk_size = file_size / N;
-        for(int i=0; i<N; i++)
-        {
-            long start = i * chunk_size; //inclusive
-            long end = (i+1) * chunk_size; //exclusive
-            if(i==N-1) end = file_size;
-            readerProxy[i].read_file(session, start, end);
-        }
-      }
-      when done_read(CkReductionMsg *m) serial
-      {
-        read_time = CkWallTimer() - start_time;
-        ckout << "Read time: " << read_time << endl;
-        CkCallback cb(CkIndex_Main::sessionClosed(0), thisProxy);
-        Ck::IO::closeReadSession(session, cb);
-        delete m;
-      }
-      when sessionClosed(CkReductionMsg *m) serial
-      {
-        delete m;
-        CkCallback closedCb(CkIndex_Main::closed(0), thisProxy);
-        Ck::IO::close(f, closedCb);
-        ckout << "Session closed" << endl;
-      }
-      when closed(CkReductionMsg *m) serial
-      {
-        ckout << "Exiting" << endl;
-        delete m;
-        CkExit();
-      }
-    };
-    
-  };
-
-  array [1D] Readers
+    entry Main(CkArgMsg * m);
+    entry void ready(Ck::IO::FileReadyMsg * m);
+    entry void start_read(Ck::IO::SessionReadyMsg * m);
+    entry void done_read(CkReductionMsg * m);
+    entry void sessionClosed(CkReductionMsg * m);
+    entry void closed(CkReductionMsg * m);
+    entry void run(){
+        serial{
+            Ck::IO::Options opts;
+    opts.numReaders = B;
+    CkCallback opened(CkIndex_Main::ready(NULL), thisProxy);
+    start_time = CkWallTimer();
+    Ck::IO::open(file_name, opened, opts);
+  }
+  when ready(Ck::IO::FileReadyMsg * m) serial
   {
-    entry Readers();
-    entry void read_file(Ck::IO::Session token, long start, long end);
-    entry void readDone(Ck::IO::ReadCompleteMsg* m);
-    entry void get_overlap(char send_back_buffer[send_back_size], long send_back_size);
-  };
+    f = m->file;
+    CkCallback sessionStart(CkIndex_Main::start_read(0), thisProxy);
+    Ck::IO::startReadSession(f, file_size, 0, sessionStart);
+    delete m;
+  }
+  when start_read(Ck::IO::SessionReadyMsg * m) serial
+  {
+    session = m->session;
+    long chunk_size = file_size / N;
+    for (int i = 0; i < N; i++)
+    {
+      long start = i * chunk_size;     // inclusive
+      long end = (i + 1) * chunk_size; // exclusive
+      if (i == N - 1)
+        end = file_size;
+      readerProxy[i].read_file(session, start, end);
+    }
+  }
+  when done_read(CkReductionMsg * m) serial
+  {
+    read_time = CkWallTimer() - start_time;
 
+    std::ofstream out(output, std::ios_base::app);
+    if (!out.is_open())
+    {
+      ckerr << "Could not open output file, printing results to stdout" << endl;
+      ckout << N << " " << B << " " << CkNumPes() << " " << CmiNumNodes() << " " << file_size << " " << read_time << "\n";
+      CkExit();
+    }
+    out << N << " " << B << " " << CkNumPes() << " " << CmiNumNodes() << " " << file_size << " " << read_time << "\n";
+    out.close();
 
+    CkCallback cb(CkIndex_Main::sessionClosed(0), thisProxy);
+    Ck::IO::closeReadSession(session, cb);
+    delete m;
+  }
+  when sessionClosed(CkReductionMsg * m) serial
+  {
+    delete m;
+    CkCallback closedCb(CkIndex_Main::closed(0), thisProxy);
+    Ck::IO::close(f, closedCb);
+    ckout << "Session closed" << endl;
+  }
+  when closed(CkReductionMsg * m) serial
+  {
+    ckout << "Exiting" << endl;
+    delete m;
+    CkExit();
+  }
 };
+}
+;
+
+array[1D] Readers
+{
+  entry Readers();
+  entry void read_file(Ck::IO::Session token, long start, long end);
+  entry void readDone(Ck::IO::ReadCompleteMsg * m);
+  entry void get_overlap(char send_back_buffer[send_back_size], long send_back_size);
+};
+}
+;
